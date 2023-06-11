@@ -15,13 +15,9 @@ function EPHEMERAL_PORT() {
 
 currentDirectory=$(pwd)
 input=$1
-REPLICASALL=$input
-REPLICASSLAVES=$(($input - 3))
 mkdir tmp
 
-echo "REPLICASALL=$input" > $currentDirectory/.env
-echo "REPLICASSLAVES=$(($input - 2))" >> $currentDirectory/.env
-for i in $(seq 1 $REPLICASALL);
+for i in $(seq 1 $((input+3)));
 do
 	echo "PORT$i=$(EPHEMERAL_PORT)" >> $currentDirectory/.env
 done
@@ -47,7 +43,6 @@ services:
     networks:
       mysql_net:
     restart: unless-stopped
-    
   init:
     image: mysql:latest
     container_name: init
@@ -56,7 +51,7 @@ services:
       - mysql_master
 EOF
 
-for w in $(seq 1 $REPLICASSLAVE);
+for w in $(seq 1 $input);
 do
 cat << EOF >> $currentDirectory/docker-compose.yml
       - mysql_slave_$w
@@ -70,17 +65,14 @@ cat << EOF >> $currentDirectory/docker-compose.yml
       - "\${PORT2}:3306"
     environment:
       MYSQL_ROOT_PASSWORD: root
+      MYSQL_REPLICATION_USER: user
+      MYSQL_REPLICATION_PASSWORD: user
     volumes:
       - ./tmp/init.sh:/init.sh
     command: /bin/bash -x init.sh
-    environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_REPLICATION_USER: user
-      MYSQL_REPLICATION_PASSWORD: user
     networks:
       mysql_net:
     restart: "no"
-    
   populate:
     image: mysql:latest
     container_name: populate
@@ -97,10 +89,9 @@ cat << EOF >> $currentDirectory/docker-compose.yml
       mysql_net:
     restart: "no"
     command: /bin/bash +x populate.sh
-    
 EOF
 
-for q in $(seq 1 $REPLICASSLAVES);
+for q in $(seq 1 $input);
 do
 cat << EOF >> $currentDirectory/docker-compose.yml
   mysql_slave_$q:
@@ -145,7 +136,7 @@ skip-host-cache
 skip-name-resolve
 EOF
 
-for k in $(seq 1 $REPLICASSLAVES);
+for k in $(seq 1 $input);
 do
 cat << EOF > $currentDirectory/tmp/slave_$k-my.cnf
 [mysqld]
@@ -170,7 +161,7 @@ master_position=\$(mysql -hmysql_master -uroot -proot -e "SHOW MASTER STATUS\G" 
 master_log_file=\$(mysql -hmysql_master -uroot -p\$MYSQL_ROOT_PASSWORD -e "SHOW MASTER STATUS\G" | grep "File:" | awk '{print \$2}')
 EOF
 
-for h in $(seq 1 $REPLICASSLAVES);
+for h in $(seq 1 $input);
 do
 cat << EOF >> $currentDirectory/tmp/init.sh
 mysql -hmysql_slave_$h -uroot -p\$MYSQL_ROOT_PASSWORD -e "STOP SLAVE;"
@@ -210,4 +201,3 @@ DROP PROCEDURE IF EXISTS insertData;
 EOF
 
 docker-compose up -d
-
